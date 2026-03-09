@@ -1,0 +1,88 @@
+services:
+
+  # ── Redis (Celery broker) ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Django REST API ──────────────────────────────────────────────────────────
+  django:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.django
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/ecomm_backend:/app
+    env_file:
+      - ./backend/ecomm_backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ── Celery Worker ────────────────────────────────────────────────────────────
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.django
+    volumes:
+      - ./backend/ecomm_backend:/app
+    env_file:
+      - ./backend/ecomm_backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_healthy
+    command: celery -A ecomm_backend worker --loglevel=info
+
+  # ── FastAPI Chat (WebSocket) ─────────────────────────────────────────────────
+  chat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.chat
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend/chat:/app
+      # Shares the Django SQLite DB (read/write for chat messages)
+      - ./backend/ecomm_backend:/django_data
+    environment:
+      - DB_PATH=/django_data/db.sqlite3
+    depends_on:
+      django:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+
+  # ── React / Vite Frontend (Development) ─────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    environment:
+      - CI=true
+    command: sh -c "pnpm install && pnpm dev --host"

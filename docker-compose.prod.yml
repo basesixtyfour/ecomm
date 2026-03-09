@@ -1,0 +1,81 @@
+services:
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  django:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.django
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/ecomm_backend/.env.prod
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=False
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Uses gunicorn for production instead of runserver
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn ecomm_backend.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.django
+    env_file:
+      - ./backend/ecomm_backend/.env.prod
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=False
+    depends_on:
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_healthy
+    command: celery -A ecomm_backend worker --loglevel=info
+
+  chat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.chat
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend/ecomm_backend:/django_data
+    environment:
+      - DB_PATH=/django_data/db.sqlite3
+    depends_on:
+      django:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+      args:
+        # Replace with your actual deployed backend URLs
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_CHAT_WS_URL: ${VITE_CHAT_WS_URL}
+    ports:
+      - "80:80"
+    depends_on:
+      - django
+      - chat
