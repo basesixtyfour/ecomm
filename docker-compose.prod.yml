@@ -1,7 +1,11 @@
+volumes:
+  sqlite-data:
+
 services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -14,15 +18,18 @@ services:
       dockerfile: Dockerfile.django
     ports:
       - "8000:8000"
+    restart: unless-stopped
+    volumes:
+      - sqlite-data:/data
     env_file:
       - ./backend/ecomm_backend/.env.prod
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=False
+      - DB_PATH=/data/db.sqlite3
     depends_on:
       redis:
         condition: service_healthy
-    # Uses gunicorn for production instead of runserver
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
@@ -38,11 +45,15 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.django
+    restart: unless-stopped
+    volumes:
+      - sqlite-data:/data
     env_file:
       - ./backend/ecomm_backend/.env.prod
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=False
+      - DB_PATH=/data/db.sqlite3
     depends_on:
       redis:
         condition: service_healthy
@@ -56,10 +67,13 @@ services:
       dockerfile: Dockerfile.chat
     ports:
       - "8001:8001"
+    restart: unless-stopped
     volumes:
-      - ./backend/ecomm_backend:/django_data
+      - sqlite-data:/data
+    env_file:
+      - ./backend/ecomm_backend/.env.prod
     environment:
-      - DB_PATH=/django_data/db.sqlite3
+      - DB_PATH=/data/db.sqlite3
     depends_on:
       django:
         condition: service_healthy
@@ -71,11 +85,11 @@ services:
       dockerfile: Dockerfile
       target: production
       args:
-        # Replace with your actual deployed backend URLs
         VITE_API_URL: ${VITE_API_URL}
         VITE_CHAT_WS_URL: ${VITE_CHAT_WS_URL}
     ports:
       - "80:80"
+    restart: unless-stopped
     depends_on:
       - django
       - chat
