@@ -1,5 +1,6 @@
 volumes:
   sqlite-data:
+  media-data:
 
 services:
 
@@ -21,6 +22,7 @@ services:
     restart: unless-stopped
     volumes:
       - sqlite-data:/data
+      - media-data:/app/media
     env_file:
       - ./backend/ecomm_backend/.env.prod
     environment:
@@ -91,6 +93,8 @@ services:
     ports:
       - "80:80"
     restart: unless-stopped
+    volumes:
+      - media-data:/usr/share/nginx/media:ro
     depends_on:
       - django
       - chat
